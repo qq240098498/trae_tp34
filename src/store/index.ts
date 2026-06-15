@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { format } from 'date-fns';
+import { format, differenceInDays, parseISO } from 'date-fns';
 import {
   generateId,
   getStockStatus as getStockStatusHelper,
@@ -84,12 +84,39 @@ export interface FeedingRecord {
   createdAt: string;
 }
 
+export type TransitionReaction = 'normal' | 'soft_stool' | 'vomit';
+
+export interface FoodTransitionDay {
+  day: number;
+  newFoodPercent: number;
+  oldFoodPercent: number;
+  reaction?: TransitionReaction;
+  note?: string;
+  recordedAt?: string;
+}
+
+export interface FoodTransitionPlan {
+  id: string;
+  petId: string;
+  oldFoodName: string;
+  newFoodName: string;
+  dailyAmount: number;
+  unit: string;
+  startDate: string;
+  days: FoodTransitionDay[];
+  status: 'active' | 'completed' | 'cancelled';
+  note?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 interface PetStoreState {
   pets: Pet[];
   inventory: InventoryItem[];
   purchases: PurchaseRecord[];
   usages: UsageRecord[];
   feedings: FeedingRecord[];
+  foodTransitionPlans: FoodTransitionPlan[];
 
   addPet: (pet: Omit<Pet, 'id' | 'createdAt' | 'updatedAt'>) => void;
   updatePet: (id: string, data: Partial<Pet>) => void;
@@ -126,6 +153,22 @@ interface PetStoreState {
   updateDailyConsumption: (itemId: string, dailyConsumption: number) => void;
   updateReminderDays: (itemId: string, reminderDays: number) => void;
   toggleAutoCalculate: (itemId: string) => void;
+
+  createFoodTransitionPlan: (
+    plan: Omit<FoodTransitionPlan, 'id' | 'days' | 'status' | 'createdAt' | 'updatedAt'>
+  ) => void;
+  updateFoodTransitionPlan: (id: string, data: Partial<FoodTransitionPlan>) => void;
+  recordTransitionReaction: (
+    planId: string,
+    day: number,
+    reaction: TransitionReaction,
+    note?: string
+  ) => void;
+  cancelFoodTransitionPlan: (id: string) => void;
+  completeFoodTransitionPlan: (id: string) => void;
+  deleteFoodTransitionPlan: (id: string) => void;
+  getActiveTransitionPlan: (petId: string) => FoodTransitionPlan | undefined;
+  getCurrentTransitionDay: (plan: FoodTransitionPlan) => number;
 }
 
 const now = () => format(new Date(), "yyyy-MM-dd'T'HH:mm:ss");
@@ -321,6 +364,17 @@ const initialFeedings: FeedingRecord[] = [
   },
 ];
 
+const initialFoodTransitionPlans: FoodTransitionPlan[] = [];
+
+function generate7DayTransitionPlan(): FoodTransitionDay[] {
+  const percentages = [20, 30, 40, 50, 60, 80, 100];
+  return percentages.map((newPercent, index) => ({
+    day: index + 1,
+    newFoodPercent: newPercent,
+    oldFoodPercent: 100 - newPercent,
+  }));
+}
+
 export const usePetStore = create<PetStoreState>()(
   persist(
     (set, get) => ({
@@ -329,6 +383,7 @@ export const usePetStore = create<PetStoreState>()(
       purchases: initialPurchases,
       usages: initialUsages,
       feedings: initialFeedings,
+      foodTransitionPlans: initialFoodTransitionPlans,
 
       addPet: (pet) => {
         const newPet: Pet = {
@@ -552,6 +607,90 @@ export const usePetStore = create<PetStoreState>()(
               : item
           ),
         }));
+      },
+
+      createFoodTransitionPlan: (plan) => {
+        const existingActivePlan = get().getActiveTransitionPlan(plan.petId);
+        if (existingActivePlan) {
+          alert('该宠物已有进行中的换粮计划，请先完成或取消当前计划');
+          return;
+        }
+
+        const newPlan: FoodTransitionPlan = {
+          ...plan,
+          id: generateId(),
+          days: generate7DayTransitionPlan(),
+          status: 'active',
+          createdAt: now(),
+          updatedAt: now(),
+        };
+        set((state) => ({
+          foodTransitionPlans: [...state.foodTransitionPlans, newPlan],
+        }));
+      },
+
+      updateFoodTransitionPlan: (id, data) => {
+        set((state) => ({
+          foodTransitionPlans: state.foodTransitionPlans.map((plan) =>
+            plan.id === id ? { ...plan, ...data, updatedAt: now() } : plan
+          ),
+        }));
+      },
+
+      recordTransitionReaction: (planId, day, reaction, note) => {
+        set((state) => ({
+          foodTransitionPlans: state.foodTransitionPlans.map((plan) => {
+            if (plan.id !== planId) return plan;
+            return {
+              ...plan,
+              days: plan.days.map((d) =>
+                d.day === day
+                  ? { ...d, reaction, note, recordedAt: now() }
+                  : d
+              ),
+              updatedAt: now(),
+            };
+          }),
+        }));
+      },
+
+      cancelFoodTransitionPlan: (id) => {
+        set((state) => ({
+          foodTransitionPlans: state.foodTransitionPlans.map((plan) =>
+            plan.id === id
+              ? { ...plan, status: 'cancelled', updatedAt: now() }
+              : plan
+          ),
+        }));
+      },
+
+      completeFoodTransitionPlan: (id) => {
+        set((state) => ({
+          foodTransitionPlans: state.foodTransitionPlans.map((plan) =>
+            plan.id === id
+              ? { ...plan, status: 'completed', updatedAt: now() }
+              : plan
+          ),
+        }));
+      },
+
+      deleteFoodTransitionPlan: (id) => {
+        set((state) => ({
+          foodTransitionPlans: state.foodTransitionPlans.filter((p) => p.id !== id),
+        }));
+      },
+
+      getActiveTransitionPlan: (petId) => {
+        return get().foodTransitionPlans.find(
+          (p) => p.petId === petId && p.status === 'active'
+        );
+      },
+
+      getCurrentTransitionDay: (plan) => {
+        const startDate = parseISO(plan.startDate);
+        const today = new Date();
+        const diffDays = differenceInDays(today, startDate) + 1;
+        return Math.max(1, Math.min(diffDays, 7));
       },
     }),
     {

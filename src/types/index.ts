@@ -8,6 +8,9 @@ export {
   type UsageRecord,
   type FeedingRecord,
   type FeedingType,
+  type TransitionReaction,
+  type FoodTransitionDay,
+  type FoodTransitionPlan,
 } from '@/store';
 
 export type { StockStatus, ConsumptionAnalysis } from '@/utils/helpers';

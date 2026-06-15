@@ -3,6 +3,7 @@ import { cn } from '@/lib/utils';
 import { usePetStore, type FeedingType, type FeedingRecord } from '@/store';
 import { formatDateTime, getSpeciesEmoji } from '@/utils/helpers';
 import QuickFeedModal from '@/components/QuickFeedModal';
+import FoodTransitionModal from '@/components/FoodTransitionModal';
 
 const typeFilterOptions: { value: 'all' | FeedingType; label: string }[] = [
   { value: 'all', label: '全部' },
@@ -36,10 +37,15 @@ const typeLabels: Record<FeedingType, string> = {
 };
 
 export default function Feedings() {
-  const { feedings, pets, deleteFeeding } = usePetStore();
+  const { feedings, pets, deleteFeeding, foodTransitionPlans, getActiveTransitionPlan, getCurrentTransitionDay } = usePetStore();
   const [modalOpen, setModalOpen] = useState(false);
+  const [transitionModalOpen, setTransitionModalOpen] = useState(false);
   const [typeFilter, setTypeFilter] = useState<'all' | FeedingType>('all');
   const [petFilter, setPetFilter] = useState<string>('all');
+
+  const activeTransitionPlans = useMemo(() => {
+    return foodTransitionPlans.filter(p => p.status === 'active');
+  }, [foodTransitionPlans]);
 
   const filteredFeedings = useMemo(() => {
     return feedings
@@ -87,6 +93,74 @@ export default function Feedings() {
             点击快速记录喂食、喂药等日常护理
           </p>
         </div>
+
+        {activeTransitionPlans.length > 0 && (
+          <div className="mb-5">
+            {activeTransitionPlans.map((plan) => {
+              const pet = pets.find(p => p.id === plan.petId);
+              const currentDay = getCurrentTransitionDay(plan);
+              const todayRecorded = plan.days[currentDay - 1]?.reaction !== undefined;
+              return (
+                <div
+                  key={plan.id}
+                  onClick={() => setTransitionModalOpen(true)}
+                  className="mb-3 cursor-pointer rounded-2xl bg-gradient-to-r from-orange-50 to-amber-50 p-4 shadow-sm ring-1 ring-orange-100 transition hover:shadow-md"
+                >
+                  <div className="mb-2 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xl">🔄</span>
+                      <span className="font-semibold text-gray-800">
+                        {pet ? `${getSpeciesEmoji(pet.species)} ${pet.name}` : '换粮进行中'}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {!todayRecorded && (
+                        <span className="animate-pulse rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-600">
+                          待记录
+                        </span>
+                      )}
+                      <span className="rounded-full bg-orange-100 px-2.5 py-0.5 text-xs font-medium text-orange-600">
+                        第 {currentDay} 天
+                      </span>
+                    </div>
+                  </div>
+                  <div className="mb-2 text-sm text-gray-600">
+                    <span className="text-gray-400">{plan.oldFoodName}</span>
+                    <span className="mx-1.5">→</span>
+                    <span className="font-medium text-gray-700">{plan.newFoodName}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-xs">
+                    <div className="h-2 flex-1 overflow-hidden rounded-full bg-gray-200">
+                      <div
+                        className="h-full rounded-full bg-gradient-to-r from-orange-400 to-orange-500 transition-all"
+                        style={{ width: `${(currentDay / 7) * 100}%` }}
+                      />
+                    </div>
+                    <span className="ml-3 text-gray-500">
+                      新粮 {plan.days[currentDay - 1]?.newFoodPercent}%
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        <button
+          onClick={() => setTransitionModalOpen(true)}
+          className="mb-5 flex w-full items-center justify-between rounded-2xl bg-white p-4 shadow-sm ring-1 ring-gray-100 transition hover:bg-gray-50 hover:shadow-md"
+        >
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-orange-100 to-amber-100">
+              <span className="text-xl">🔄</span>
+            </div>
+            <div className="text-left">
+              <div className="font-semibold text-gray-800">换粮过渡计划</div>
+              <div className="text-xs text-gray-500">科学7日换粮，避免肠胃不适</div>
+            </div>
+          </div>
+          <span className="text-gray-400">→</span>
+        </button>
 
         <div className="mb-5 space-y-3">
           <div className="flex gap-2 overflow-x-auto pb-1">
@@ -168,6 +242,7 @@ export default function Feedings() {
       </main>
 
       <QuickFeedModal open={modalOpen} onClose={() => setModalOpen(false)} />
+      <FoodTransitionModal open={transitionModalOpen} onClose={() => setTransitionModalOpen(false)} />
     </div>
   );
 }
