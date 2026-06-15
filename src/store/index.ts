@@ -95,6 +95,45 @@ export interface FoodTransitionDay {
   recordedAt?: string;
 }
 
+export interface TransitionPreset {
+  id: string;
+  name: string;
+  description: string;
+  days: number;
+  percentages: number[];
+}
+
+export const TRANSITION_PRESETS: TransitionPreset[] = [
+  {
+    id: 'standard_7day',
+    name: '标准7日换粮',
+    description: '适用于健康成年宠物，肠胃适应能力较好',
+    days: 7,
+    percentages: [20, 30, 40, 50, 60, 80, 100],
+  },
+  {
+    id: 'gentle_10day',
+    name: '温和10日换粮',
+    description: '适用于肠胃敏感的宠物，循序渐进更安全',
+    days: 10,
+    percentages: [10, 20, 25, 30, 40, 50, 60, 70, 85, 100],
+  },
+  {
+    id: 'slow_14day',
+    name: '缓慢14日换粮',
+    description: '适用于幼宠、老年宠或有肠胃病史的宠物',
+    days: 14,
+    percentages: [10, 15, 20, 25, 30, 35, 40, 50, 55, 60, 70, 80, 90, 100],
+  },
+  {
+    id: 'quick_4day',
+    name: '快速4日换粮',
+    description: '仅建议同品牌同系列配方微调时使用',
+    days: 4,
+    percentages: [30, 50, 75, 100],
+  },
+];
+
 export interface FoodTransitionPlan {
   id: string;
   petId: string;
@@ -104,6 +143,7 @@ export interface FoodTransitionPlan {
   unit: string;
   startDate: string;
   days: FoodTransitionDay[];
+  presetId?: string;
   status: 'active' | 'completed' | 'cancelled';
   note?: string;
   createdAt: string;
@@ -155,7 +195,8 @@ interface PetStoreState {
   toggleAutoCalculate: (itemId: string) => void;
 
   createFoodTransitionPlan: (
-    plan: Omit<FoodTransitionPlan, 'id' | 'days' | 'status' | 'createdAt' | 'updatedAt'>
+    plan: Omit<FoodTransitionPlan, 'id' | 'days' | 'status' | 'createdAt' | 'updatedAt'>,
+    customPercentages?: number[]
   ) => void;
   updateFoodTransitionPlan: (id: string, data: Partial<FoodTransitionPlan>) => void;
   recordTransitionReaction: (
@@ -169,6 +210,7 @@ interface PetStoreState {
   deleteFoodTransitionPlan: (id: string) => void;
   getActiveTransitionPlan: (petId: string) => FoodTransitionPlan | undefined;
   getCurrentTransitionDay: (plan: FoodTransitionPlan) => number;
+  generateTransitionDays: (percentages: number[]) => FoodTransitionDay[];
 }
 
 const now = () => format(new Date(), "yyyy-MM-dd'T'HH:mm:ss");
@@ -366,8 +408,7 @@ const initialFeedings: FeedingRecord[] = [
 
 const initialFoodTransitionPlans: FoodTransitionPlan[] = [];
 
-function generate7DayTransitionPlan(): FoodTransitionDay[] {
-  const percentages = [20, 30, 40, 50, 60, 80, 100];
+function generateTransitionDays(percentages: number[]): FoodTransitionDay[] {
   return percentages.map((newPercent, index) => ({
     day: index + 1,
     newFoodPercent: newPercent,
@@ -609,17 +650,27 @@ export const usePetStore = create<PetStoreState>()(
         }));
       },
 
-      createFoodTransitionPlan: (plan) => {
+      createFoodTransitionPlan: (plan, customPercentages) => {
         const existingActivePlan = get().getActiveTransitionPlan(plan.petId);
         if (existingActivePlan) {
           alert('该宠物已有进行中的换粮计划，请先完成或取消当前计划');
           return;
         }
 
+        let percentages: number[];
+        if (customPercentages && customPercentages.length > 0) {
+          percentages = customPercentages;
+        } else if (plan.presetId) {
+          const preset = TRANSITION_PRESETS.find(p => p.id === plan.presetId);
+          percentages = preset ? preset.percentages : TRANSITION_PRESETS[0].percentages;
+        } else {
+          percentages = TRANSITION_PRESETS[0].percentages;
+        }
+
         const newPlan: FoodTransitionPlan = {
           ...plan,
           id: generateId(),
-          days: generate7DayTransitionPlan(),
+          days: generateTransitionDays(percentages),
           status: 'active',
           createdAt: now(),
           updatedAt: now(),
@@ -690,7 +741,11 @@ export const usePetStore = create<PetStoreState>()(
         const startDate = parseISO(plan.startDate);
         const today = new Date();
         const diffDays = differenceInDays(today, startDate) + 1;
-        return Math.max(1, Math.min(diffDays, 7));
+        return Math.max(1, Math.min(diffDays, plan.days.length));
+      },
+
+      generateTransitionDays: (percentages) => {
+        return generateTransitionDays(percentages);
       },
     }),
     {

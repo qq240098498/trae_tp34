@@ -3,9 +3,11 @@ import { format, parseISO, addDays } from 'date-fns';
 import { cn } from '@/lib/utils';
 import {
   usePetStore,
+  TRANSITION_PRESETS,
   type Pet,
   type TransitionReaction,
   type FoodTransitionPlan,
+  type TransitionPreset,
 } from '@/store';
 import { getSpeciesEmoji } from '@/utils/helpers';
 
@@ -56,11 +58,26 @@ export default function FoodTransitionModal({ open, onClose }: FoodTransitionMod
   const [unit, setUnit] = useState('g');
   const [startDate, setStartDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [note, setNote] = useState('');
+  const [selectedPresetId, setSelectedPresetId] = useState<string>(TRANSITION_PRESETS[0].id);
+  const [useCustomPlan, setUseCustomPlan] = useState(false);
+  const [customPercentages, setCustomPercentages] = useState<number[]>([20, 30, 40, 50, 60, 80, 100]);
 
   const foodItems = useMemo(
     () => inventory.filter((i) => i.category === 'food'),
     [inventory]
   );
+
+  const currentPercentages = useMemo(() => {
+    if (useCustomPlan) {
+      return customPercentages;
+    }
+    const preset = TRANSITION_PRESETS.find(p => p.id === selectedPresetId);
+    return preset ? preset.percentages : TRANSITION_PRESETS[0].percentages;
+  }, [useCustomPlan, customPercentages, selectedPresetId]);
+
+  const selectedPreset = useMemo(() => {
+    return TRANSITION_PRESETS.find(p => p.id === selectedPresetId) || TRANSITION_PRESETS[0];
+  }, [selectedPresetId]);
 
   const activePlans = useMemo(
     () => foodTransitionPlans.filter((p) => p.status === 'active'),
@@ -86,6 +103,9 @@ export default function FoodTransitionModal({ open, onClose }: FoodTransitionMod
       setUnit('g');
       setStartDate(format(new Date(), 'yyyy-MM-dd'));
       setNote('');
+      setSelectedPresetId(TRANSITION_PRESETS[0].id);
+      setUseCustomPlan(false);
+      setCustomPercentages([20, 30, 40, 50, 60, 80, 100]);
     }
   }, [open, pets]);
 
@@ -95,15 +115,30 @@ export default function FoodTransitionModal({ open, onClose }: FoodTransitionMod
     e.preventDefault();
     if (!oldFoodName.trim() || !newFoodName.trim() || !dailyAmount) return;
 
-    createFoodTransitionPlan({
-      petId,
-      oldFoodName: oldFoodName.trim(),
-      newFoodName: newFoodName.trim(),
-      dailyAmount: parseFloat(dailyAmount),
-      unit,
-      startDate,
-      note: note.trim(),
-    });
+    const validPercentages = currentPercentages.filter(p => p > 0 && p <= 100);
+    if (validPercentages.length < 2) {
+      alert('换粮计划至少需要2天的配置，且每天新粮比例应在1-100之间');
+      return;
+    }
+
+    if (validPercentages[validPercentages.length - 1] !== 100) {
+      alert('最后一天的新粮比例必须为100%');
+      return;
+    }
+
+    createFoodTransitionPlan(
+      {
+        petId,
+        oldFoodName: oldFoodName.trim(),
+        newFoodName: newFoodName.trim(),
+        dailyAmount: parseFloat(dailyAmount),
+        unit,
+        startDate,
+        note: note.trim(),
+        presetId: useCustomPlan ? undefined : selectedPresetId,
+      },
+      useCustomPlan ? validPercentages : undefined
+    );
 
     setMode('list');
   };
@@ -467,6 +502,124 @@ export default function FoodTransitionModal({ open, onClose }: FoodTransitionMod
 
       <div>
         <label className="mb-1.5 block text-sm font-medium text-gray-700">
+          换粮方案
+        </label>
+        <div className="flex gap-2 rounded-2xl bg-gray-50 p-1.5">
+          <button
+            type="button"
+            onClick={() => setUseCustomPlan(false)}
+            className={cn(
+              'flex-1 rounded-xl py-2 text-sm font-medium transition-all',
+              !useCustomPlan
+                ? 'bg-white text-gray-800 shadow-sm'
+                : 'text-gray-500 hover:text-gray-700'
+            )}
+          >
+            📋 预设方案
+          </button>
+          <button
+            type="button"
+            onClick={() => setUseCustomPlan(true)}
+            className={cn(
+              'flex-1 rounded-xl py-2 text-sm font-medium transition-all',
+              useCustomPlan
+                ? 'bg-white text-gray-800 shadow-sm'
+                : 'text-gray-500 hover:text-gray-700'
+            )}
+          >
+            ⚙️ 自定义
+          </button>
+        </div>
+      </div>
+
+      {!useCustomPlan && (
+        <div className="space-y-2">
+          {TRANSITION_PRESETS.map((preset) => (
+            <div
+              key={preset.id}
+              onClick={() => setSelectedPresetId(preset.id)}
+              className={cn(
+                'cursor-pointer rounded-xl p-3 transition-all ring-2',
+                selectedPresetId === preset.id
+                  ? 'bg-orange-50 ring-orange-300'
+                  : 'bg-gray-50 ring-transparent hover:bg-gray-100'
+              )}
+            >
+              <div className="mb-1 flex items-center justify-between">
+                <span className="font-medium text-gray-800">{preset.name}</span>
+                <span className="rounded-full bg-white px-2 py-0.5 text-xs text-gray-500">
+                  {preset.days}天
+                </span>
+              </div>
+              <p className="text-xs text-gray-500">{preset.description}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {useCustomPlan && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-medium text-gray-700">自定义每日新粮比例</span>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  if (customPercentages.length > 2) {
+                    setCustomPercentages(customPercentages.slice(0, -1));
+                  }
+                }}
+                disabled={customPercentages.length <= 2}
+                className="rounded-lg bg-gray-100 px-3 py-1 text-xs font-medium text-gray-600 transition hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                - 减少天数
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (customPercentages.length < 30) {
+                    setCustomPercentages([...customPercentages, 100]);
+                  }
+                }}
+                disabled={customPercentages.length >= 30}
+                className="rounded-lg bg-gray-100 px-3 py-1 text-xs font-medium text-gray-600 transition hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                + 增加天数
+              </button>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            {customPercentages.map((percent, index) => (
+              <div key={index} className="flex items-center gap-2 rounded-lg bg-gray-50 p-2">
+                <span className="w-8 text-xs font-medium text-gray-500">
+                  第{index + 1}天
+                </span>
+                <input
+                  type="number"
+                  min="1"
+                  max="100"
+                  value={percent}
+                  onChange={(e) => {
+                    const newPercentages = [...customPercentages];
+                    newPercentages[index] = Math.min(100, Math.max(1, parseInt(e.target.value) || 0));
+                    setCustomPercentages(newPercentages);
+                  }}
+                  className="w-16 flex-1 rounded-lg border border-gray-200 bg-white px-2 py-1 text-sm text-center text-gray-800 outline-none transition focus:border-primary"
+                />
+                <span className="text-xs text-gray-400">%</span>
+              </div>
+            ))}
+          </div>
+          <div className="rounded-lg bg-amber-50 p-3">
+            <p className="text-xs text-amber-700">
+              💡 提示：比例应逐步递增，最后一天必须为100%。建议每天增幅不超过20%，以减少肠胃应激。
+            </p>
+          </div>
+        </div>
+      )}
+
+      <div>
+        <label className="mb-1.5 block text-sm font-medium text-gray-700">
           备注
         </label>
         <textarea
@@ -479,39 +632,32 @@ export default function FoodTransitionModal({ open, onClose }: FoodTransitionMod
       </div>
 
       <div className="rounded-2xl bg-blue-50 p-4">
-        <div className="mb-2 flex items-center gap-2">
-          <span className="text-xl">📋</span>
-          <h4 className="font-semibold text-gray-800">7日换粮计划预览</h4>
+        <div className="mb-2 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-xl">📋</span>
+            <h4 className="font-semibold text-gray-800">
+              {useCustomPlan ? '自定义' : selectedPreset.name}换粮计划预览
+            </h4>
+          </div>
+          <span className="rounded-full bg-white px-2.5 py-0.5 text-xs font-medium text-gray-600">
+            共 {currentPercentages.length} 天
+          </span>
         </div>
-        <div className="space-y-2 text-sm">
-          <div className="flex justify-between text-gray-600">
-            <span>第1天</span>
-            <span>新粮20% + 旧粮80%</span>
-          </div>
-          <div className="flex justify-between text-gray-600">
-            <span>第2天</span>
-            <span>新粮30% + 旧粮70%</span>
-          </div>
-          <div className="flex justify-between text-gray-600">
-            <span>第3天</span>
-            <span>新粮40% + 旧粮60%</span>
-          </div>
-          <div className="flex justify-between text-gray-600">
-            <span>第4天</span>
-            <span>新粮50% + 旧粮50%</span>
-          </div>
-          <div className="flex justify-between text-gray-600">
-            <span>第5天</span>
-            <span>新粮60% + 旧粮40%</span>
-          </div>
-          <div className="flex justify-between text-gray-600">
-            <span>第6天</span>
-            <span>新粮80% + 旧粮20%</span>
-          </div>
-          <div className="flex justify-between font-medium text-gray-800">
-            <span>第7天</span>
-            <span>新粮100%</span>
-          </div>
+        <div className="max-h-48 space-y-1.5 overflow-y-auto text-sm">
+          {currentPercentages.map((percent, index) => (
+            <div
+              key={index}
+              className={cn(
+                'flex justify-between rounded-lg px-2 py-1',
+                percent === 100 ? 'font-medium text-gray-800' : 'text-gray-600'
+              )}
+            >
+              <span>第{index + 1}天</span>
+              <span>
+                新粮{percent}% + 旧粮{100 - percent}%
+              </span>
+            </div>
+          ))}
         </div>
       </div>
 
@@ -587,7 +733,7 @@ export default function FoodTransitionModal({ open, onClose }: FoodTransitionMod
             <div className="mb-3 h-3 w-full overflow-hidden rounded-full bg-gray-100">
               <div
                 className="h-full rounded-full bg-gradient-to-r from-primary to-orange-400 transition-all"
-                style={{ width: `${(currentDay / 7) * 100}%` }}
+                style={{ width: `${(currentDay / selectedPlan.days.length) * 100}%` }}
               />
             </div>
             <div className="grid grid-cols-2 gap-3">
@@ -616,7 +762,12 @@ export default function FoodTransitionModal({ open, onClose }: FoodTransitionMod
         )}
 
         <div>
-          <h4 className="mb-3 font-semibold text-gray-800">📊 7日换粮进度</h4>
+          <h4 className="mb-3 flex items-center justify-between font-semibold text-gray-800">
+            <span>📊 换粮进度</span>
+            <span className="rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-600">
+              共 {selectedPlan.days.length} 天
+            </span>
+          </h4>
           <div className="space-y-2">
             {selectedPlan.days.map((day, index) => {
               const isPastOrToday =
@@ -715,7 +866,7 @@ export default function FoodTransitionModal({ open, onClose }: FoodTransitionMod
 
         {selectedPlan.status === 'active' && (
           <div className="space-y-3 pt-2">
-            {currentDay >= 7 && isTodayRecorded && (
+            {currentDay >= selectedPlan.days.length && isTodayRecorded && (
               <button
                 onClick={() => handleComplete(selectedPlan.id)}
                 className="w-full rounded-2xl bg-gradient-to-r from-green-500 to-emerald-500 py-3.5 text-base font-semibold text-white shadow-lg shadow-green-500/30 transition hover:shadow-xl hover:shadow-green-500/40 hover:-translate-y-0.5"

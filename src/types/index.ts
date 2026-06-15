@@ -11,6 +11,8 @@ export {
   type TransitionReaction,
   type FoodTransitionDay,
   type FoodTransitionPlan,
+  type TransitionPreset,
+  TRANSITION_PRESETS,
 } from '@/store';
 
 export type { StockStatus, ConsumptionAnalysis } from '@/utils/helpers';
