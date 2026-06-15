@@ -154,12 +154,11 @@ export default function Feedings() {
             <div className="absolute left-[22px] top-2 h-[calc(100%-16px)] w-px border-l-2 border-dashed border-gray-200" />
 
             <div className="space-y-4">
-              {filteredFeedings.map((record, index) => (
+              {filteredFeedings.map((record) => (
                 <TimelineItem
                   key={record.id}
                   record={record}
                   pet={getPet(record.petId)}
-                  index={index}
                   onDelete={handleDelete}
                 />
               ))}
@@ -176,13 +175,11 @@ export default function Feedings() {
 interface TimelineItemProps {
   record: FeedingRecord;
   pet: ReturnType<typeof usePetStore.getState>['pets'][number] | undefined;
-  index: number;
   onDelete: (id: string) => void;
 }
 
-function TimelineItem({ record, pet, index, onDelete }: TimelineItemProps) {
+function TimelineItem({ record, pet, onDelete }: TimelineItemProps) {
   const dotColor = typeColors[record.type];
-  const isEven = index % 2 === 0;
 
   return (
     <div className="relative flex items-start gap-4 pl-12">

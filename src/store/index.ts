@@ -4,7 +4,9 @@ import { format } from 'date-fns';
 import {
   generateId,
   getStockStatus as getStockStatusHelper,
+  calculateDailyConsumption,
   type StockStatus,
+  type ConsumptionAnalysis,
 } from '@/utils/helpers';
 
 export type PetSpecies = 'cat' | 'dog' | 'rabbit' | 'bird' | 'fish' | 'other';
@@ -42,6 +44,9 @@ export interface InventoryItem {
   lastPurchaseDate: string;
   unitPrice: number;
   note: string;
+  dailyConsumption: number;
+  reminderDays: number;
+  autoCalculateConsumption: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -115,6 +120,12 @@ interface PetStoreState {
   getLowStockItems: () => InventoryItem[];
   getInventoryByCategory: (category: InventoryCategory) => InventoryItem[];
   getStockStatus: (item: InventoryItem) => StockStatus;
+
+  analyzeConsumption: (itemId: string) => ConsumptionAnalysis;
+  getItemsNeedingReminder: () => Array<{ item: InventoryItem; analysis: ConsumptionAnalysis }>;
+  updateDailyConsumption: (itemId: string, dailyConsumption: number) => void;
+  updateReminderDays: (itemId: string, reminderDays: number) => void;
+  toggleAutoCalculate: (itemId: string) => void;
 }
 
 const now = () => format(new Date(), "yyyy-MM-dd'T'HH:mm:ss");
@@ -171,6 +182,9 @@ const initialInventory: InventoryItem[] = [
     lastPurchaseDate: '2026-05-10',
     unitPrice: 128,
     note: '小橘的主粮',
+    dailyConsumption: 0.1,
+    reminderDays: 3,
+    autoCalculateConsumption: true,
     createdAt: now(),
     updatedAt: now(),
   },
@@ -185,6 +199,9 @@ const initialInventory: InventoryItem[] = [
     lastPurchaseDate: '2026-05-01',
     unitPrice: 8.5,
     note: '金枪鱼味，小橘最爱',
+    dailyConsumption: 1,
+    reminderDays: 3,
+    autoCalculateConsumption: true,
     createdAt: now(),
     updatedAt: now(),
   },
@@ -199,6 +216,9 @@ const initialInventory: InventoryItem[] = [
     lastPurchaseDate: '2026-04-20',
     unitPrice: 35,
     note: '6L装，绿茶味',
+    dailyConsumption: 0.25,
+    reminderDays: 5,
+    autoCalculateConsumption: false,
     createdAt: now(),
     updatedAt: now(),
   },
@@ -213,6 +233,9 @@ const initialInventory: InventoryItem[] = [
     lastPurchaseDate: '2026-03-15',
     unitPrice: 45,
     note: '体内外同驱',
+    dailyConsumption: 0.033,
+    reminderDays: 7,
+    autoCalculateConsumption: false,
     createdAt: now(),
     updatedAt: now(),
   },
@@ -227,6 +250,9 @@ const initialInventory: InventoryItem[] = [
     lastPurchaseDate: '2026-05-20',
     unitPrice: 3,
     note: '鸡肉干，训练用',
+    dailyConsumption: 2,
+    reminderDays: 3,
+    autoCalculateConsumption: false,
     createdAt: now(),
     updatedAt: now(),
   },
@@ -437,6 +463,95 @@ export const usePetStore = create<PetStoreState>()(
 
       getStockStatus: (item) => {
         return getStockStatusHelper(item.currentQuantity, item.minThreshold);
+      },
+
+      analyzeConsumption: (itemId) => {
+        const { inventory, feedings } = get();
+        const item = inventory.find((i) => i.id === itemId);
+        if (!item) {
+          return {
+            dailyConsumption: 0,
+            unit: '',
+            daysRemaining: Infinity,
+            shouldRemind: false,
+            reminderDate: null,
+            feedingsAnalyzed: 0,
+            analysisPeriodDays: 7,
+          };
+        }
+
+        if (item.autoCalculateConsumption) {
+          const analysis = calculateDailyConsumption(
+            feedings,
+            item.name,
+            item.unit,
+            item.currentQuantity,
+            item.reminderDays
+          );
+          if (analysis.feedingsAnalyzed > 0) {
+            return analysis;
+          }
+        }
+
+        const daily = item.dailyConsumption;
+        const daysRemaining = daily > 0 ? item.currentQuantity / daily : Infinity;
+        const shouldRemind = daysRemaining !== Infinity && daysRemaining <= item.reminderDays;
+
+        let reminderDate: string | null = null;
+        if (shouldRemind && daysRemaining !== Infinity) {
+          const reminder = new Date(Date.now() + (daysRemaining - item.reminderDays) * 24 * 60 * 60 * 1000);
+          reminderDate = format(reminder, 'yyyy-MM-dd');
+        }
+
+        return {
+          dailyConsumption: daily,
+          unit: item.unit,
+          daysRemaining: daysRemaining === Infinity ? Infinity : Math.round(daysRemaining * 10) / 10,
+          shouldRemind,
+          reminderDate,
+          feedingsAnalyzed: 0,
+          analysisPeriodDays: 0,
+        };
+      },
+
+      getItemsNeedingReminder: () => {
+        const { inventory, analyzeConsumption } = get();
+        return inventory
+          .map((item) => ({
+            item,
+            analysis: analyzeConsumption(item.id),
+          }))
+          .filter(({ analysis }) => analysis.shouldRemind);
+      },
+
+      updateDailyConsumption: (itemId, dailyConsumption) => {
+        set((state) => ({
+          inventory: state.inventory.map((item) =>
+            item.id === itemId
+              ? { ...item, dailyConsumption, autoCalculateConsumption: false, updatedAt: now() }
+              : item
+          ),
+        }));
+      },
+
+      updateReminderDays: (itemId, reminderDays) => {
+        set((state) => ({
+          inventory: state.inventory.map((item) =>
+            item.id === itemId
+              ? { ...item, reminderDays, updatedAt: now() }
+              : item
+          ),
+        }));
+      },
+
+      toggleAutoCalculate: (itemId) => {
+        set((state) => ({
+          inventory: state.inventory.map((item) =>
+            item.id === itemId
+              ? { ...item, autoCalculateConsumption: !item.autoCalculateConsumption, updatedAt: now() }
+              : item
+          ),
+        }));
       },
     }),
     {

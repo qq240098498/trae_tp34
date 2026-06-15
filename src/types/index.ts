@@ -10,4 +10,4 @@ export {
   type FeedingType,
 } from '@/store';
 
-export type { StockStatus } from '@/utils/helpers';
+export type { StockStatus, ConsumptionAnalysis } from '@/utils/helpers';

@@ -9,15 +9,44 @@ import {
   ArrowDownToLine,
   ArrowUpFromLine,
   Clock,
+  AlertTriangle,
+  Calendar,
+  ShoppingCart,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { usePetStore, type InventoryItem } from '@/store';
-import { formatDate, getCategoryIcon } from '@/utils/helpers';
+import { formatDate, getCategoryIcon, type ConsumptionAnalysis } from '@/utils/helpers';
 import { cn } from '@/lib/utils';
+
+function formatDaysRemaining(days: number): string {
+  if (days === Infinity) return '∞';
+  if (days < 1) return '< 1 天';
+  if (days === 1) return '1 天';
+  if (days < 30) return `${days.toFixed(1)} 天`;
+  const months = days / 30;
+  if (months < 12) return `约 ${months.toFixed(1)} 个月`;
+  const years = months / 12;
+  return `约 ${years.toFixed(1)} 年`;
+}
+
+function getConsumptionDisplay(analysis: ConsumptionAnalysis): string {
+  if (analysis.dailyConsumption === 0) return '未设置';
+  const daily = analysis.dailyConsumption;
+  if (daily < 1) {
+    const grams = daily * 1000;
+    if (analysis.unit === 'kg') {
+      return `${grams.toFixed(0)}g/天`;
+    }
+  }
+  if (daily >= 1000 && analysis.unit === 'g') {
+    return `${(daily / 1000).toFixed(2)}kg/天`;
+  }
+  return `${daily} ${analysis.unit}/天`;
+}
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const { pets, inventory, feedings, getLowStockItems, getStockStatus } =
+  const { pets, inventory, feedings, getLowStockItems, getStockStatus, getItemsNeedingReminder } =
     usePetStore();
 
   const today = format(new Date(), 'yyyy-MM-dd');
@@ -33,16 +62,19 @@ export default function Dashboard() {
       const feedingDate = formatDate(f.recordTime);
       return feedingDate === today;
     }).length;
+    const itemsNeedingReminder = getItemsNeedingReminder();
 
     return {
       petCount,
       categoryCount,
       warningCount,
       todayFeedingCount,
+      reminderCount: itemsNeedingReminder.length,
     };
-  }, [pets, inventory, feedings, getLowStockItems, today]);
+  }, [pets, inventory, feedings, getLowStockItems, getItemsNeedingReminder, today]);
 
   const lowStockItems = useMemo(() => getLowStockItems(), [getLowStockItems]);
+  const itemsNeedingReminder = useMemo(() => getItemsNeedingReminder(), [getItemsNeedingReminder]);
 
   const statCards = [
     {
@@ -62,6 +94,15 @@ export default function Dashboard() {
       textColor: 'text-primary',
     },
     {
+      label: '补货提醒',
+      value: stats.reminderCount,
+      icon: ShoppingCart,
+      bgColor: 'from-warning/20',
+      iconBg: 'bg-warning/30',
+      textColor: 'text-warning',
+      highlight: stats.reminderCount > 0,
+    },
+    {
       label: '库存预警',
       value: stats.warningCount,
       icon: LayoutDashboard,
@@ -74,9 +115,9 @@ export default function Dashboard() {
       label: '今日喂食',
       value: stats.todayFeedingCount,
       icon: Utensils,
-      bgColor: 'from-warning/20',
-      iconBg: 'bg-warning/30',
-      textColor: 'text-warning',
+      bgColor: 'from-success/20',
+      iconBg: 'bg-success/30',
+      textColor: 'text-success',
     },
   ];
 
@@ -151,7 +192,7 @@ export default function Dashboard() {
       </div>
 
       <section>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 md:gap-6">
           {statCards.map((card, index) => (
             <div
               key={index}
@@ -270,6 +311,121 @@ export default function Dashboard() {
                       </span>
                     </div>
                   </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
+      <section>
+        <div className="mb-4 flex items-center gap-3">
+          <h2 className="font-display text-xl md:text-2xl text-gray-800">
+            🛒 补货提醒
+          </h2>
+          {itemsNeedingReminder.length > 0 && (
+            <span className="rounded-full bg-warning/20 px-3 py-1 text-xs font-medium text-warning">
+              {itemsNeedingReminder.length} 项
+            </span>
+          )}
+        </div>
+
+        {itemsNeedingReminder.length === 0 ? (
+          <div className="rounded-2xl border-2 border-dashed border-success/30 bg-success/5 p-10 text-center">
+            <div className="text-4xl mb-3">🎉</div>
+            <p className="text-gray-500">所有物品都还够用，暂时不需要补货！</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 md:gap-5">
+            {itemsNeedingReminder.map(({ item, analysis }) => {
+              const isUrgent = analysis.daysRemaining <= item.reminderDays;
+              return (
+                <div
+                  key={item.id}
+                  className={cn(
+                    'rounded-2xl p-5 shadow-md border-2 hover:-translate-y-1 hover:shadow-lg transition-all duration-300',
+                    isUrgent
+                      ? 'bg-gradient-to-br from-danger/15 via-danger/5 to-danger/10 border-danger/30'
+                      : 'bg-gradient-to-br from-warning/15 via-warning/5 to-warning/10 border-warning/30'
+                  )}
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm text-2xl">
+                        {getCategoryIcon(item.category)}
+                      </div>
+                      <div>
+                        <h3 className="font-medium text-gray-800">
+                          {item.name}
+                        </h3>
+                        <p className="text-xs text-gray-500">
+                          剩余 {item.currentQuantity}{item.unit}
+                        </p>
+                      </div>
+                    </div>
+                    <span
+                      className={cn(
+                        'rounded-full px-3 py-1 text-xs font-medium text-white shadow-sm',
+                        isUrgent ? 'bg-danger' : 'bg-warning'
+                      )}
+                    >
+                      {isUrgent ? '立即下单' : '准备补货'}
+                    </span>
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-2 gap-3">
+                    <div className="rounded-xl bg-white/70 p-3">
+                      <div className="flex items-center gap-1 text-xs text-gray-500">
+                        <Clock size={12} /> 每日消耗
+                      </div>
+                      <div className="mt-1 font-display text-base text-gray-800">
+                        {getConsumptionDisplay(analysis)}
+                      </div>
+                    </div>
+                    <div className="rounded-xl bg-white/70 p-3">
+                      <div className="flex items-center gap-1 text-xs text-gray-500">
+                        <Calendar size={12} /> 还能吃
+                      </div>
+                      <div className={cn(
+                        'mt-1 font-display text-base font-semibold',
+                        isUrgent ? 'text-danger' : 'text-warning'
+                      )}>
+                        {formatDaysRemaining(analysis.daysRemaining)}
+                      </div>
+                    </div>
+                  </div>
+
+                  {analysis.reminderDate && (
+                    <div className={cn(
+                      'mt-3 flex items-center gap-2 rounded-xl p-3 text-xs',
+                      isUrgent ? 'bg-danger/20 text-danger' : 'bg-warning/20 text-warning'
+                    )}>
+                      <AlertTriangle size={14} />
+                      <span>
+                        建议 <strong>{analysis.reminderDate}</strong> 前下单
+                        （提前 {item.reminderDays} 天，留出物流时间）
+                      </span>
+                    </div>
+                  )}
+
+                  {analysis.feedingsAnalyzed > 0 && (
+                    <div className="mt-2 text-xs text-gray-500">
+                      📊 基于最近 {analysis.analysisPeriodDays} 天的 {analysis.feedingsAnalyzed} 条喂养记录计算
+                    </div>
+                  )}
+
+                  <button
+                    onClick={() => navigate('/inventory')}
+                    className={cn(
+                      'mt-4 w-full rounded-xl py-2.5 text-sm font-medium text-white transition-colors',
+                      isUrgent
+                        ? 'bg-danger hover:bg-danger/90'
+                        : 'bg-warning hover:bg-warning/90'
+                    )}
+                  >
+                    <ShoppingCart size={14} className="inline mr-1.5" />
+                    去库存管理
+                  </button>
                 </div>
               );
             })}

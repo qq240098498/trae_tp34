@@ -10,16 +10,19 @@ import {
   AlertTriangle,
   CheckCircle,
   MinusCircle,
+  Settings,
+  RefreshCw,
+  Clock,
+  Calendar,
 } from 'lucide-react';
 import {
   usePetStore,
   type InventoryItem,
   type InventoryCategory,
+  type ConsumptionAnalysis,
 } from '@/types';
 import {
   getCategoryIcon,
-  getCategoryName,
-  getStockStatus,
   formatDate,
   type StockStatus,
 } from '@/utils/helpers';
@@ -41,7 +44,8 @@ type ModalType =
   | 'add'
   | 'edit'
   | 'purchase'
-  | 'usage';
+  | 'usage'
+  | 'settings';
 
 interface ModalState {
   type: ModalType;
@@ -57,6 +61,9 @@ interface AddFormData {
   lastPurchaseAmount: number;
   unitPrice: number;
   note: string;
+  dailyConsumption: number;
+  reminderDays: number;
+  autoCalculateConsumption: boolean;
 }
 
 const emptyAddForm: AddFormData = {
@@ -68,6 +75,9 @@ const emptyAddForm: AddFormData = {
   lastPurchaseAmount: 0,
   unitPrice: 0,
   note: '',
+  dailyConsumption: 0,
+  reminderDays: 3,
+  autoCalculateConsumption: false,
 };
 
 function getStatusConfig(status: StockStatus) {
@@ -105,6 +115,39 @@ function calculateProgressWidth(item: InventoryItem, status: StockStatus) {
   return Math.min(100, Math.max(5, ratio * 66.67));
 }
 
+function formatDaysRemaining(days: number): string {
+  if (days === Infinity) return '∞';
+  if (days < 1) return '< 1 天';
+  if (days === 1) return '1 天';
+  if (days < 30) return `${days.toFixed(1)} 天`;
+  const months = days / 30;
+  if (months < 12) return `约 ${months.toFixed(1)} 个月`;
+  const years = months / 12;
+  return `约 ${years.toFixed(1)} 年`;
+}
+
+function getDaysRemainingColor(days: number, reminderDays: number): string {
+  if (days === Infinity) return 'text-gray-500';
+  if (days <= reminderDays) return 'text-danger';
+  if (days <= reminderDays * 2) return 'text-warning';
+  return 'text-success';
+}
+
+function getConsumptionDisplay(analysis: ConsumptionAnalysis): string {
+  if (analysis.dailyConsumption === 0) return '未设置';
+  const daily = analysis.dailyConsumption;
+  if (daily < 1) {
+    const grams = daily * 1000;
+    if (analysis.unit === 'kg') {
+      return `${grams.toFixed(0)}g/天`;
+    }
+  }
+  if (daily >= 1000 && analysis.unit === 'g') {
+    return `${(daily / 1000).toFixed(2)}kg/天`;
+  }
+  return `${daily} ${analysis.unit}/天`;
+}
+
 export default function Inventory() {
   const {
     inventory,
@@ -114,6 +157,10 @@ export default function Inventory() {
     recordPurchase,
     recordUsage,
     getStockStatus: getStoreStockStatus,
+    analyzeConsumption,
+    updateDailyConsumption,
+    updateReminderDays,
+    toggleAutoCalculate,
   } = usePetStore();
 
   const [activeCategory, setActiveCategory] = useState<InventoryCategory | 'all'>('all');
@@ -127,6 +174,10 @@ export default function Inventory() {
 
   const [usageQuantity, setUsageQuantity] = useState<number>(1);
   const [usageNote, setUsageNote] = useState<string>('');
+
+  const [settingsDailyConsumption, setSettingsDailyConsumption] = useState<number>(0);
+  const [settingsReminderDays, setSettingsReminderDays] = useState<number>(3);
+  const [settingsAutoCalculate, setSettingsAutoCalculate] = useState<boolean>(false);
 
   const filteredInventory = useMemo(() => {
     if (activeCategory === 'all') return inventory;
@@ -148,8 +199,30 @@ export default function Inventory() {
       lastPurchaseAmount: item.lastPurchaseAmount,
       unitPrice: item.unitPrice,
       note: item.note,
+      dailyConsumption: item.dailyConsumption,
+      reminderDays: item.reminderDays,
+      autoCalculateConsumption: item.autoCalculateConsumption,
     });
     setModal({ type: 'edit', item });
+  };
+
+  const openSettingsModal = (item: InventoryItem) => {
+    setSettingsDailyConsumption(item.dailyConsumption);
+    setSettingsReminderDays(item.reminderDays);
+    setSettingsAutoCalculate(item.autoCalculateConsumption);
+    setModal({ type: 'settings', item });
+  };
+
+  const handleSettingsSubmit = () => {
+    if (!modal.item) return;
+    if (settingsAutoCalculate !== modal.item.autoCalculateConsumption) {
+      toggleAutoCalculate(modal.item.id);
+    }
+    if (!settingsAutoCalculate) {
+      updateDailyConsumption(modal.item.id, settingsDailyConsumption);
+    }
+    updateReminderDays(modal.item.id, settingsReminderDays);
+    closeModal();
   };
 
   const openPurchaseModal = (item: InventoryItem) => {
@@ -182,6 +255,9 @@ export default function Inventory() {
       lastPurchaseDate: now,
       unitPrice: addForm.unitPrice,
       note: addForm.note,
+      dailyConsumption: addForm.dailyConsumption,
+      reminderDays: addForm.reminderDays,
+      autoCalculateConsumption: addForm.autoCalculateConsumption,
     });
     closeModal();
   };
@@ -197,6 +273,9 @@ export default function Inventory() {
       lastPurchaseAmount: addForm.lastPurchaseAmount,
       unitPrice: addForm.unitPrice,
       note: addForm.note,
+      dailyConsumption: addForm.dailyConsumption,
+      reminderDays: addForm.reminderDays,
+      autoCalculateConsumption: addForm.autoCalculateConsumption,
     });
     closeModal();
   };
@@ -227,6 +306,7 @@ export default function Inventory() {
       edit: '编辑用品',
       purchase: modal.item ? `入库 - ${modal.item.name}` : '入库',
       usage: modal.item ? `出库 - ${modal.item.name}` : '出库',
+      settings: modal.item ? `消耗设置 - ${modal.item.name}` : '消耗设置',
     };
 
     return (
@@ -360,6 +440,77 @@ export default function Inventory() {
                   }
                   className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 outline-none transition-colors focus:border-primary focus:bg-white"
                 />
+              </div>
+
+              <div className="rounded-xl bg-gray-50 p-4">
+                <h3 className="mb-3 text-sm font-semibold text-gray-700">⚡ 消耗设置</h3>
+                <div className="space-y-4">
+                  <div>
+                    <label className="mb-1.5 flex items-center justify-between">
+                      <span className="text-sm font-medium text-gray-700">
+                        自动计算消耗速度
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setAddForm({ ...addForm, autoCalculateConsumption: !addForm.autoCalculateConsumption })}
+                        className={cn(
+                          'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none',
+                          addForm.autoCalculateConsumption ? 'bg-primary' : 'bg-gray-200'
+                        )}
+                      >
+                        <span
+                          className={cn(
+                            'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                            addForm.autoCalculateConsumption ? 'translate-x-5' : 'translate-x-0'
+                          )}
+                        />
+                      </button>
+                    </label>
+                    <p className="text-xs text-gray-500">
+                      开启后将基于喂养记录自动计算每日消耗量
+                    </p>
+                  </div>
+
+                  {!addForm.autoCalculateConsumption && (
+                    <div>
+                      <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                        每日消耗量 ({addForm.unit}/天)
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="any"
+                        value={addForm.dailyConsumption}
+                        onChange={(e) =>
+                          setAddForm({ ...addForm, dailyConsumption: Number(e.target.value) || 0 })}
+                        placeholder="例如：0.1"
+                        className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 outline-none transition-colors focus:border-primary focus:bg-white"
+                      />
+                      <p className="mt-1 text-xs text-gray-400">
+                        例如：每天喂2次，每次50g = 0.1kg/天
+                      </p>
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                      提前提醒天数
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={addForm.reminderDays}
+                      onChange={(e) =>
+                        setAddForm({ ...addForm, reminderDays: Number(e.target.value) || 0 })}
+                      placeholder="3"
+                      className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 outline-none transition-colors focus:border-primary focus:bg-white"
+                    />
+                    <p className="mt-1 text-xs text-gray-400">
+                      留出网购物流时间，建议设置3-7天
+                    </p>
+                  </div>
+                </div>
               </div>
 
               <div>
@@ -537,6 +688,163 @@ export default function Inventory() {
               </div>
             </div>
           )}
+
+          {modal.type === 'settings' && modal.item && (
+            <div className="space-y-5">
+              {(() => {
+                const analysis = analyzeConsumption(modal.item!.id);
+                return (
+                  <>
+                    <div className="rounded-2xl bg-gradient-to-r from-primary/10 to-secondary/10 p-4">
+                      <div className="mb-3 flex items-center gap-2">
+                        <RefreshCw size={18} className="text-primary" />
+                        <span className="text-sm font-medium text-gray-700">消耗分析</span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="rounded-xl bg-white/80 p-3">
+                          <div className="text-xs text-gray-500">每日消耗</div>
+                          <div className="mt-1 font-display text-lg text-gray-800">
+                            {getConsumptionDisplay(analysis)}
+                          </div>
+                        </div>
+                        <div className="rounded-xl bg-white/80 p-3">
+                          <div className="text-xs text-gray-500">还能吃</div>
+                          <div className={cn(
+                            'mt-1 font-display text-lg',
+                            getDaysRemainingColor(analysis.daysRemaining, modal.item!.reminderDays)
+                          )}>
+                            {formatDaysRemaining(analysis.daysRemaining)}
+                          </div>
+                        </div>
+                      </div>
+                      {analysis.feedingsAnalyzed > 0 && (
+                        <div className="mt-3 rounded-xl bg-white/60 p-3 text-xs text-gray-500">
+                          基于最近 {analysis.analysisPeriodDays} 天的 {analysis.feedingsAnalyzed} 条喂养记录自动计算
+                        </div>
+                      )}
+                      {analysis.shouldRemind && analysis.reminderDate && (
+                        <div className="mt-3 flex items-center gap-2 rounded-xl bg-danger/10 p-3 text-xs text-danger">
+                          <AlertTriangle size={14} />
+                          <span>建议 {analysis.reminderDate} 前下单补货（提前 {modal.item!.reminderDays} 天）</span>
+                        </div>
+                      )}
+                    </div>
+
+                    <div>
+                      <label className="mb-2 flex items-center justify-between">
+                        <span className="text-sm font-medium text-gray-700">
+                          自动计算消耗速度
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setSettingsAutoCalculate(!settingsAutoCalculate)}
+                          className={cn(
+                            'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none',
+                            settingsAutoCalculate ? 'bg-primary' : 'bg-gray-200'
+                          )}
+                        >
+                          <span
+                            className={cn(
+                              'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                              settingsAutoCalculate ? 'translate-x-5' : 'translate-x-0'
+                            )}
+                          />
+                        </button>
+                      </label>
+                      <p className="text-xs text-gray-500">
+                        开启后将基于喂养记录自动计算每日消耗量
+                      </p>
+                    </div>
+
+                    {!settingsAutoCalculate && (
+                      <div>
+                        <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                          每日消耗量 ({modal.item.unit}/天)
+                        </label>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setSettingsDailyConsumption(Math.max(0, settingsDailyConsumption - 0.01))}
+                            className="flex h-11 w-11 items-center justify-center rounded-xl border border-gray-200 bg-gray-50 text-gray-600 transition-colors hover:bg-gray-100"
+                          >
+                            <MinusCircle size={18} />
+                          </button>
+                          <input
+                            type="number"
+                            min="0"
+                            step="any"
+                            value={settingsDailyConsumption}
+                            onChange={(e) => setSettingsDailyConsumption(Number(e.target.value) || 0)}
+                            className="flex-1 rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-center outline-none transition-colors focus:border-primary focus:bg-white"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setSettingsDailyConsumption(settingsDailyConsumption + 0.01)}
+                            className="flex h-11 w-11 items-center justify-center rounded-xl border border-gray-200 bg-gray-50 text-gray-600 transition-colors hover:bg-gray-100"
+                          >
+                            <Plus size={18} />
+                          </button>
+                          <span className="text-sm text-gray-500">{modal.item.unit}</span>
+                        </div>
+                        <p className="mt-1.5 text-xs text-gray-400">
+                          例如：每天喂2次，每次50g = 0.1kg/天
+                        </p>
+                      </div>
+                    )}
+
+                    <div>
+                      <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                        提前提醒天数
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setSettingsReminderDays(Math.max(0, settingsReminderDays - 1))}
+                          className="flex h-11 w-11 items-center justify-center rounded-xl border border-gray-200 bg-gray-50 text-gray-600 transition-colors hover:bg-gray-100"
+                        >
+                          <MinusCircle size={18} />
+                        </button>
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={settingsReminderDays}
+                          onChange={(e) => setSettingsReminderDays(Number(e.target.value) || 0)}
+                          className="flex-1 rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-center outline-none transition-colors focus:border-primary focus:bg-white"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setSettingsReminderDays(settingsReminderDays + 1)}
+                          className="flex h-11 w-11 items-center justify-center rounded-xl border border-gray-200 bg-gray-50 text-gray-600 transition-colors hover:bg-gray-100"
+                        >
+                          <Plus size={18} />
+                        </button>
+                        <span className="text-sm text-gray-500">天</span>
+                      </div>
+                      <p className="mt-1.5 text-xs text-gray-400">
+                        留出网购物流时间，建议设置3-7天
+                      </p>
+                    </div>
+
+                    <div className="flex gap-3 pt-2">
+                      <button
+                        onClick={closeModal}
+                        className="flex-1 rounded-xl border border-gray-200 bg-white py-2.5 text-gray-600 transition-colors hover:bg-gray-50"
+                      >
+                        取消
+                      </button>
+                      <button
+                        onClick={handleSettingsSubmit}
+                        className="flex-1 rounded-xl bg-primary py-2.5 font-medium text-white transition-colors hover:bg-primary/90"
+                      >
+                        保存设置
+                      </button>
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+          )}
         </div>
       </div>
     );
@@ -613,6 +921,7 @@ export default function Inventory() {
               const statusConfig = getStatusConfig(status);
               const progressWidth = calculateProgressWidth(item, status);
               const isLow = status === 'low';
+              const analysis = analyzeConsumption(item.id);
 
               return (
                 <div
@@ -620,7 +929,8 @@ export default function Inventory() {
                   className={cn(
                     'group relative overflow-hidden rounded-2xl border-2 bg-white p-5 transition-all card-shadow',
                     'hover:-translate-y-1',
-                    isLow && 'border-danger animate-shake'
+                    isLow && 'border-danger animate-shake',
+                    analysis.shouldRemind && 'border-warning'
                   )}
                   style={
                     isLow
@@ -633,6 +943,11 @@ export default function Inventory() {
                   {isLow && (
                     <div className="absolute -right-8 top-4 rotate-45 bg-danger px-10 py-1 text-xs font-medium text-white">
                       该补货了
+                    </div>
+                  )}
+                  {analysis.shouldRemind && !isLow && (
+                    <div className="absolute -right-8 top-4 rotate-45 bg-warning px-10 py-1 text-xs font-medium text-white">
+                      即将用完
                     </div>
                   )}
 
@@ -653,6 +968,13 @@ export default function Inventory() {
                         </span>
                       </div>
                     </div>
+                    <button
+                      onClick={() => openSettingsModal(item)}
+                      className="rounded-full p-2 text-gray-400 transition-colors hover:bg-gray-100 hover:text-primary"
+                      title="消耗设置"
+                    >
+                      <Settings size={16} />
+                    </button>
                   </div>
 
                   <div className="mb-4">
@@ -673,6 +995,41 @@ export default function Inventory() {
                         style={{ width: `${progressWidth}%` }}
                       />
                     </div>
+                  </div>
+
+                  <div className="mb-4 rounded-xl bg-gradient-to-r from-primary/5 to-secondary/5 p-3">
+                    <div className="mb-2 flex items-center justify-between">
+                      <span className="flex items-center gap-1 text-xs text-gray-500">
+                        <Clock size={12} /> 每日消耗
+                      </span>
+                      {item.autoCalculateConsumption && (
+                        <span className="flex items-center gap-1 text-xs text-primary">
+                          <RefreshCw size={12} /> 自动计算
+                        </span>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-sm">
+                      <div>
+                        <div className="font-display text-base text-gray-800">
+                          {getConsumptionDisplay(analysis)}
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-xs text-gray-500">还能吃</div>
+                        <div className={cn(
+                          'font-display text-base font-semibold',
+                          getDaysRemainingColor(analysis.daysRemaining, item.reminderDays)
+                        )}>
+                          {formatDaysRemaining(analysis.daysRemaining)}
+                        </div>
+                      </div>
+                    </div>
+                    {analysis.shouldRemind && analysis.reminderDate && (
+                      <div className="mt-2 flex items-center gap-1 rounded-lg bg-danger/10 px-2 py-1.5 text-xs text-danger">
+                        <Calendar size={12} />
+                        <span>建议 {analysis.reminderDate} 前下单（提前{item.reminderDays}天）</span>
+                      </div>
+                    )}
                   </div>
 
                   <div className="mb-4 grid grid-cols-2 gap-2 text-sm">
