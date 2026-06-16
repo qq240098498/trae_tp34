@@ -150,6 +150,27 @@ export interface FoodTransitionPlan {
   updatedAt: string;
 }
 
+export interface WeightRecord {
+  id: string;
+  petId: string;
+  weight: number;
+  recordDate: string;
+  note?: string;
+  createdAt: string;
+}
+
+export interface FeedingRecommendation {
+  currentWeight: number;
+  idealWeight: number;
+  weightDiffPercent: number;
+  status: 'underweight' | 'normal' | 'overweight';
+  suggestedDailyAmount: number;
+  currentDailyAmount?: number;
+  adjustmentPercent: number;
+  ageFactor: number;
+  reason: string;
+}
+
 interface PetStoreState {
   pets: Pet[];
   inventory: InventoryItem[];
@@ -157,6 +178,7 @@ interface PetStoreState {
   usages: UsageRecord[];
   feedings: FeedingRecord[];
   foodTransitionPlans: FoodTransitionPlan[];
+  weightRecords: WeightRecord[];
 
   addPet: (pet: Omit<Pet, 'id' | 'createdAt' | 'updatedAt'>) => void;
   updatePet: (id: string, data: Partial<Pet>) => void;
@@ -211,6 +233,13 @@ interface PetStoreState {
   getActiveTransitionPlan: (petId: string) => FoodTransitionPlan | undefined;
   getCurrentTransitionDay: (plan: FoodTransitionPlan) => number;
   generateTransitionDays: (percentages: number[]) => FoodTransitionDay[];
+
+  addWeightRecord: (
+    record: Omit<WeightRecord, 'id' | 'createdAt'>
+  ) => void;
+  deleteWeightRecord: (id: string) => void;
+  getWeightRecordsByPet: (petId: string) => WeightRecord[];
+  getLatestWeightRecord: (petId: string) => WeightRecord | undefined;
 }
 
 const now = () => format(new Date(), "yyyy-MM-dd'T'HH:mm:ss");
@@ -408,6 +437,54 @@ const initialFeedings: FeedingRecord[] = [
 
 const initialFoodTransitionPlans: FoodTransitionPlan[] = [];
 
+const initialWeightRecords: WeightRecord[] = [
+  {
+    id: generateId(),
+    petId: initialPets[0].id,
+    weight: 4.8,
+    recordDate: '2026-03-01',
+    note: '体检时测量',
+    createdAt: now(),
+  },
+  {
+    id: generateId(),
+    petId: initialPets[0].id,
+    weight: 5.0,
+    recordDate: '2026-04-15',
+    createdAt: now(),
+  },
+  {
+    id: generateId(),
+    petId: initialPets[0].id,
+    weight: 5.2,
+    recordDate: '2026-06-01',
+    note: '最近食欲很好',
+    createdAt: now(),
+  },
+  {
+    id: generateId(),
+    petId: initialPets[1].id,
+    weight: 11.8,
+    recordDate: '2026-02-15',
+    createdAt: now(),
+  },
+  {
+    id: generateId(),
+    petId: initialPets[1].id,
+    weight: 12.2,
+    recordDate: '2026-04-20',
+    createdAt: now(),
+  },
+  {
+    id: generateId(),
+    petId: initialPets[1].id,
+    weight: 12.5,
+    recordDate: '2026-06-10',
+    note: '运动量大，体型保持良好',
+    createdAt: now(),
+  },
+];
+
 function generateTransitionDays(percentages: number[]): FoodTransitionDay[] {
   return percentages.map((newPercent, index) => ({
     day: index + 1,
@@ -425,6 +502,7 @@ export const usePetStore = create<PetStoreState>()(
       usages: initialUsages,
       feedings: initialFeedings,
       foodTransitionPlans: initialFoodTransitionPlans,
+      weightRecords: initialWeightRecords,
 
       addPet: (pet) => {
         const newPet: Pet = {
@@ -448,6 +526,7 @@ export const usePetStore = create<PetStoreState>()(
         set((state) => ({
           pets: state.pets.filter((pet) => pet.id !== id),
           feedings: state.feedings.filter((f) => f.petId !== id),
+          weightRecords: state.weightRecords.filter((w) => w.petId !== id),
         }));
       },
 
@@ -746,6 +825,39 @@ export const usePetStore = create<PetStoreState>()(
 
       generateTransitionDays: (percentages) => {
         return generateTransitionDays(percentages);
+      },
+
+      addWeightRecord: (record) => {
+        const newRecord: WeightRecord = {
+          ...record,
+          id: generateId(),
+          createdAt: now(),
+        };
+        set((state) => {
+          const sortedRecords = [...state.weightRecords, newRecord].sort(
+            (a, b) => new Date(b.recordDate).getTime() - new Date(a.recordDate).getTime()
+          );
+          return { weightRecords: sortedRecords };
+        });
+      },
+
+      deleteWeightRecord: (id) => {
+        set((state) => ({
+          weightRecords: state.weightRecords.filter((w) => w.id !== id),
+        }));
+      },
+
+      getWeightRecordsByPet: (petId) => {
+        return get()
+          .weightRecords.filter((w) => w.petId === petId)
+          .sort(
+            (a, b) => new Date(a.recordDate).getTime() - new Date(b.recordDate).getTime()
+          );
+      },
+
+      getLatestWeightRecord: (petId) => {
+        const records = get().getWeightRecordsByPet(petId);
+        return records.length > 0 ? records[records.length - 1] : undefined;
       },
     }),
     {

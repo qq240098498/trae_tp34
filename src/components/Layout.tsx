@@ -5,6 +5,7 @@ import {
   Cat,
   Package,
   Utensils,
+  Scale,
   Menu,
   X,
 } from 'lucide-react';
@@ -13,6 +14,7 @@ import { cn } from '@/lib/utils';
 const navItems = [
   { to: '/', label: '仪表盘', icon: LayoutDashboard },
   { to: '/pets', label: '宠物档案', icon: Cat },
+  { to: '/weight', label: '体重管理', icon: Scale },
   { to: '/inventory', label: '用品库存', icon: Package },
   { to: '/feedings', label: '喂食记录', icon: Utensils },
 ];

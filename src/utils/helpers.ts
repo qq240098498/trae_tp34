@@ -6,7 +6,7 @@ import {
   parseISO,
   isValid,
 } from 'date-fns';
-import type { InventoryCategory, PetSpecies } from '@/store';
+import type { InventoryCategory, PetSpecies, Pet, WeightRecord, FeedingRecommendation } from '@/store';
 
 export type StockStatus = 'normal' | 'warning' | 'low';
 
@@ -252,4 +252,216 @@ export function calculateDailyConsumption(
     feedingsAnalyzed: recentFeedings.length,
     analysisPeriodDays: daysCovered,
   };
+}
+
+export interface IdealWeightRange {
+  min: number;
+  max: number;
+  ideal: number;
+}
+
+export function getIdealWeightRange(species: PetSpecies, breed?: string): IdealWeightRange {
+  const ranges: Record<PetSpecies, IdealWeightRange> = {
+    cat: { min: 3.5, max: 5.5, ideal: 4.5 },
+    dog: { min: 8, max: 25, ideal: 15 },
+    rabbit: { min: 1.5, max: 3, ideal: 2.2 },
+    bird: { min: 0.03, max: 0.5, ideal: 0.1 },
+    fish: { min: 0.05, max: 0.5, ideal: 0.15 },
+    other: { min: 1, max: 10, ideal: 5 },
+  };
+
+  const base = ranges[species] || ranges.other;
+
+  if (species === 'dog' && breed) {
+    const breedLower = breed.toLowerCase();
+    if (breedLower.includes('吉娃娃') || breedLower.includes('chihuahua') || breedLower.includes('茶杯')) {
+      return { min: 1.5, max: 3, ideal: 2 };
+    }
+    if (breedLower.includes('柴犬') || breedLower.includes('shiba') || breedLower.includes('柯基') || breedLower.includes('corgi')) {
+      return { min: 8, max: 14, ideal: 11 };
+    }
+    if (breedLower.includes('金毛') || breedLower.includes('golden') || breedLower.includes('拉布拉多') || breedLower.includes('labrador')) {
+      return { min: 25, max: 35, ideal: 30 };
+    }
+    if (breedLower.includes('阿拉斯加') || breedLower.includes('阿拉') || breedLower.includes('哈士奇') || breedLower.includes('husky')) {
+      return { min: 20, max: 30, ideal: 25 };
+    }
+  }
+
+  if (species === 'cat' && breed) {
+    const breedLower = breed.toLowerCase();
+    if (breedLower.includes('橘猫') || breedLower.includes('加菲')) {
+      return { min: 4, max: 7, ideal: 5.5 };
+    }
+    if (breedLower.includes('布偶') || breedLower.includes('ragdoll') || breedLower.includes('缅因')) {
+      return { min: 4.5, max: 9, ideal: 6.5 };
+    }
+  }
+
+  return base;
+}
+
+export function getAgeFactor(species: PetSpecies, birthday: string): number {
+  const birthDate = parseISO(birthday);
+  if (!isValid(birthDate)) return 1;
+
+  const ageYears = differenceInYears(new Date(), birthDate);
+  const ageMonths = differenceInMonths(new Date(), birthDate);
+
+  if (species === 'cat') {
+    if (ageMonths < 12) return 1.5;
+    if (ageYears >= 7) return 0.9;
+    if (ageYears >= 10) return 0.8;
+    return 1;
+  }
+  if (species === 'dog') {
+    if (ageMonths < 18) return 1.4;
+    if (ageYears >= 7) return 0.85;
+    if (ageYears >= 10) return 0.75;
+    return 1;
+  }
+  if (species === 'rabbit') {
+    if (ageMonths < 8) return 1.3;
+    if (ageYears >= 5) return 0.85;
+    return 1;
+  }
+  return 1;
+}
+
+export function calculateFeedingRecommendation(
+  pet: Pet,
+  weightRecords: WeightRecord[],
+  currentDailyAmount?: number
+): FeedingRecommendation {
+  const idealWeightRange = getIdealWeightRange(pet.species, pet.breed);
+  const latestRecord = weightRecords.length > 0
+    ? weightRecords[weightRecords.length - 1]
+    : null;
+  const currentWeight = latestRecord?.weight ?? pet.weight ?? idealWeightRange.ideal;
+  const ageFactor = getAgeFactor(pet.species, pet.birthday);
+
+  const idealWeight = idealWeightRange.ideal;
+  const weightDiff = currentWeight - idealWeight;
+  const weightDiffPercent = (weightDiff / idealWeight) * 100;
+
+  let status: 'underweight' | 'normal' | 'overweight';
+  if (weightDiffPercent > 10) {
+    status = 'overweight';
+  } else if (weightDiffPercent < -10) {
+    status = 'underweight';
+  } else {
+    status = 'normal';
+  }
+
+  const baseDailyGramsPerKg = 30;
+  const baseDailyAmount = idealWeight * baseDailyGramsPerKg * ageFactor;
+
+  let adjustmentPercent = 0;
+  if (status === 'overweight') {
+    adjustmentPercent = Math.min(-15, weightDiffPercent / 2);
+  } else if (status === 'underweight') {
+    adjustmentPercent = Math.max(15, -weightDiffPercent / 2);
+  }
+
+  const suggestedDailyAmount = baseDailyAmount * (1 + adjustmentPercent / 100);
+
+  let reason = '体重处于健康范围，建议保持当前喂食量';
+  if (status === 'overweight') {
+    reason = `体重偏重${Math.abs(weightDiffPercent).toFixed(1)}%，建议减少${Math.abs(adjustmentPercent).toFixed(0)}%粮食`;
+  } else if (status === 'underweight') {
+    reason = `体重偏轻${Math.abs(weightDiffPercent).toFixed(1)}%，建议增加${Math.abs(adjustmentPercent).toFixed(0)}%粮食`;
+  }
+
+  if (ageFactor > 1) {
+    reason += `（幼年宠物，需要更多营养）`;
+  } else if (ageFactor < 1) {
+    reason += `（老年宠物，代谢较慢）`;
+  }
+
+  return {
+    currentWeight,
+    idealWeight,
+    weightDiffPercent: Math.round(weightDiffPercent * 10) / 10,
+    status,
+    suggestedDailyAmount: Math.round(suggestedDailyAmount),
+    currentDailyAmount,
+    adjustmentPercent: Math.round(adjustmentPercent * 10) / 10,
+    ageFactor,
+    reason,
+  };
+}
+
+export function exportWeightReportCSV(
+  pet: Pet,
+  weightRecords: WeightRecord[]
+): string {
+  const BOM = '\uFEFF';
+  const lines: string[] = [];
+
+  lines.push(`宠物体重健康报告`);
+  lines.push(`生成时间: ${format(new Date(), 'yyyy-MM-dd HH:mm:ss')}`);
+  lines.push(``);
+  lines.push(`宠物信息`);
+  lines.push(`姓名,${pet.name}`);
+  lines.push(`种类,${getSpeciesName(pet.species)}`);
+  lines.push(`品种,${pet.breed || '-'}`);
+  lines.push(`生日,${pet.birthday || '-'}`);
+  lines.push(`年龄,${calculateAge(pet.birthday)}`);
+  lines.push(``);
+  lines.push(`体重记录`);
+  lines.push(`日期,体重(kg),备注`);
+
+  const sortedRecords = [...weightRecords].sort(
+    (a, b) => new Date(a.recordDate).getTime() - new Date(b.recordDate).getTime()
+  );
+
+  sortedRecords.forEach((record) => {
+    lines.push(`${record.recordDate},${record.weight},${record.note || ''}`);
+  });
+
+  lines.push(``);
+  lines.push(`体重趋势分析`);
+  if (sortedRecords.length >= 2) {
+    const first = sortedRecords[0];
+    const last = sortedRecords[sortedRecords.length - 1];
+    const diff = last.weight - first.weight;
+    const diffPercent = ((diff / first.weight) * 100).toFixed(2);
+    const days = differenceInDays(parseISO(last.recordDate), parseISO(first.recordDate));
+    lines.push(`起始体重,${first.weight}kg (${first.recordDate})`);
+    lines.push(`当前体重,${last.weight}kg (${last.recordDate})`);
+    lines.push(`体重变化,${diff >= 0 ? '+' : ''}${diff.toFixed(2)}kg (${diffPercent}%)`);
+    lines.push(`记录周期,${days}天`);
+  } else if (sortedRecords.length === 1) {
+    lines.push(`当前体重,${sortedRecords[0].weight}kg (${sortedRecords[0].recordDate})`);
+    lines.push(`提示,记录数据不足，无法进行趋势分析`);
+  } else {
+    lines.push(`提示,暂无体重记录`);
+  }
+
+  const recommendation = calculateFeedingRecommendation(pet, sortedRecords);
+  lines.push(``);
+  lines.push(`喂食建议`);
+  lines.push(`理想体重,${recommendation.idealWeight}kg`);
+  lines.push(`体重状态,${recommendation.status === 'normal' ? '正常' : recommendation.status === 'overweight' ? '偏重' : '偏轻'}`);
+  lines.push(`体重差异,${recommendation.weightDiffPercent >= 0 ? '+' : ''}${recommendation.weightDiffPercent}%`);
+  lines.push(`建议每日喂食量,${recommendation.suggestedDailyAmount}g`);
+  lines.push(`建议说明,${recommendation.reason}`);
+
+  lines.push(``);
+  lines.push(`--- 本报告由宠管家自动生成 ---`);
+
+  return BOM + lines.join('\n');
+}
+
+export function downloadCSV(content: string, filename: string) {
+  const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.setAttribute('href', url);
+  link.setAttribute('download', filename);
+  link.style.visibility = 'hidden';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
 }

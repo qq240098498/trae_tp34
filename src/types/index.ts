@@ -12,6 +12,8 @@ export {
   type FoodTransitionDay,
   type FoodTransitionPlan,
   type TransitionPreset,
+  type WeightRecord,
+  type FeedingRecommendation,
   TRANSITION_PRESETS,
 } from '@/store';
 
