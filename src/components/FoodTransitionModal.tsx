@@ -14,6 +14,7 @@ import { getSpeciesEmoji } from '@/utils/helpers';
 interface FoodTransitionModalProps {
   open: boolean;
   onClose: () => void;
+  initialPlanId?: string | null;
 }
 
 const reactionOptions: { value: TransitionReaction; label: string; emoji: string; color: string }[] = [
@@ -34,7 +35,7 @@ const reactionDotColors: Record<TransitionReaction, string> = {
   vomit: 'bg-red-500',
 };
 
-export default function FoodTransitionModal({ open, onClose }: FoodTransitionModalProps) {
+export default function FoodTransitionModal({ open, onClose, initialPlanId }: FoodTransitionModalProps) {
   const {
     pets,
     inventory,
@@ -94,8 +95,6 @@ export default function FoodTransitionModal({ open, onClose }: FoodTransitionMod
 
   useEffect(() => {
     if (open) {
-      setMode('list');
-      setSelectedPlan(null);
       setPetId(pets[0]?.id || '');
       setOldFoodName('');
       setNewFoodName('');
@@ -106,8 +105,19 @@ export default function FoodTransitionModal({ open, onClose }: FoodTransitionMod
       setSelectedPresetId(TRANSITION_PRESETS[0].id);
       setUseCustomPlan(false);
       setCustomPercentages([20, 30, 40, 50, 60, 80, 100]);
+
+      if (initialPlanId) {
+        const plan = foodTransitionPlans.find((p) => p.id === initialPlanId);
+        if (plan) {
+          setSelectedPlan(plan);
+          setMode('detail');
+          return;
+        }
+      }
+      setMode('list');
+      setSelectedPlan(null);
     }
-  }, [open, pets]);
+  }, [open, pets, initialPlanId, foodTransitionPlans]);
 
   if (!open) return null;
 
@@ -176,6 +186,8 @@ export default function FoodTransitionModal({ open, onClose }: FoodTransitionMod
   const handleDelete = (planId: string) => {
     if (confirm('确定要删除此换粮计划吗？此操作不可恢复。')) {
       deleteFoodTransitionPlan(planId);
+      setMode('list');
+      setSelectedPlan(null);
     }
   };
 
@@ -680,8 +692,11 @@ export default function FoodTransitionModal({ open, onClose }: FoodTransitionMod
 
     const pet = getPet(selectedPlan.petId);
     const currentDay =
-      selectedPlan.status === 'active' ? getCurrentTransitionDay(selectedPlan) : 7;
-    const isTodayRecorded = selectedPlan.days[currentDay - 1]?.reaction !== undefined;
+      selectedPlan.status === 'active'
+        ? getCurrentTransitionDay(selectedPlan)
+        : selectedPlan.days.length;
+    const safeDayIndex = Math.min(currentDay - 1, selectedPlan.days.length - 1);
+    const isTodayRecorded = selectedPlan.days[safeDayIndex]?.reaction !== undefined;
 
     const getDayAmount = (percent: number) => {
       return ((selectedPlan.dailyAmount * percent) / 100).toFixed(1);

@@ -37,9 +37,10 @@ const typeLabels: Record<FeedingType, string> = {
 };
 
 export default function Feedings() {
-  const { feedings, pets, deleteFeeding, foodTransitionPlans, getActiveTransitionPlan, getCurrentTransitionDay } = usePetStore();
+  const { feedings, pets, deleteFeeding, foodTransitionPlans, getCurrentTransitionDay } = usePetStore();
   const [modalOpen, setModalOpen] = useState(false);
   const [transitionModalOpen, setTransitionModalOpen] = useState(false);
+  const [selectedTransitionPlanId, setSelectedTransitionPlanId] = useState<string | null>(null);
   const [typeFilter, setTypeFilter] = useState<'all' | FeedingType>('all');
   const [petFilter, setPetFilter] = useState<string>('all');
 
@@ -103,7 +104,10 @@ export default function Feedings() {
               return (
                 <div
                   key={plan.id}
-                  onClick={() => setTransitionModalOpen(true)}
+                  onClick={() => {
+                    setSelectedTransitionPlanId(plan.id);
+                    setTransitionModalOpen(true);
+                  }}
                   className="mb-3 cursor-pointer rounded-2xl bg-gradient-to-r from-orange-50 to-amber-50 p-4 shadow-sm ring-1 ring-orange-100 transition hover:shadow-md"
                 >
                   <div className="mb-2 flex items-center justify-between">
@@ -133,11 +137,11 @@ export default function Feedings() {
                     <div className="h-2 flex-1 overflow-hidden rounded-full bg-gray-200">
                       <div
                         className="h-full rounded-full bg-gradient-to-r from-orange-400 to-orange-500 transition-all"
-                        style={{ width: `${(currentDay / 7) * 100}%` }}
+                        style={{ width: `${(currentDay / plan.days.length) * 100}%` }}
                       />
                     </div>
                     <span className="ml-3 text-gray-500">
-                      新粮 {plan.days[currentDay - 1]?.newFoodPercent}%
+                      新粮 {plan.days[currentDay - 1]?.newFoodPercent ?? 0}%
                     </span>
                   </div>
                 </div>
@@ -147,7 +151,10 @@ export default function Feedings() {
         )}
 
         <button
-          onClick={() => setTransitionModalOpen(true)}
+          onClick={() => {
+            setSelectedTransitionPlanId(null);
+            setTransitionModalOpen(true);
+          }}
           className="mb-5 flex w-full items-center justify-between rounded-2xl bg-white p-4 shadow-sm ring-1 ring-gray-100 transition hover:bg-gray-50 hover:shadow-md"
         >
           <div className="flex items-center gap-3">
@@ -242,7 +249,14 @@ export default function Feedings() {
       </main>
 
       <QuickFeedModal open={modalOpen} onClose={() => setModalOpen(false)} />
-      <FoodTransitionModal open={transitionModalOpen} onClose={() => setTransitionModalOpen(false)} />
+      <FoodTransitionModal
+        open={transitionModalOpen}
+        onClose={() => {
+          setTransitionModalOpen(false);
+          setSelectedTransitionPlanId(null);
+        }}
+        initialPlanId={selectedTransitionPlanId}
+      />
     </div>
   );
 }
